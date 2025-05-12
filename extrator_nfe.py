@@ -1,59 +1,67 @@
 import streamlit as st
-import xml.etree.ElementTree as ET
 import pandas as pd
+import xml.etree.ElementTree as ET
+from io import BytesIO
 
-st.set_page_config(page_title="Extrator de Itens NFe XML", layout="wide")
-st.title("📄 Extrator de Itens NFe XML")
+st.set_page_config(page_title="Extrator NFe XML", layout="wide")
 
-uploaded_files = st.file_uploader("Selecione os arquivos XML da NFe", type="xml", accept_multiple_files=True)
+st.title("📄 Extrator de Itens da NFe (XML)")
 
-# Função para extrair dados de cada NFe
-def extrair_dados(xml_content):
-    root = ET.fromstring(xml_content)
+# Upload de múltiplos arquivos XML
+uploaded_files = st.file_uploader("Selecione arquivos XML de Nota Fiscal", type="xml", accept_multiple_files=True)
 
-    ns = {'nfe': 'http://www.portalfiscal.inf.br/nfe'}
+data = []
 
-    # Dados principais
-    nome_fornecedor = root.findtext('.//nfe:emit/nfe:xNome', namespaces=ns)
-    numero_nf = root.findtext('.//nfe:ide/nfe:nNF', namespaces=ns)
-    valor_total_nf = root.findtext('.//nfe:ICMSTot/nfe:vNF', namespaces=ns)
-
-    # Itens (det)
-    itens = []
-    for det in root.findall('.//nfe:det', namespaces=ns):
-        nome_item = det.findtext('nfe:prod/nfe:xProd', namespaces=ns)
-        quantidade = det.findtext('nfe:prod/nfe:qCom', namespaces=ns)
-        valor_unitario = det.findtext('nfe:prod/nfe:vUnCom', namespaces=ns)
-        valor_total_item = det.findtext('nfe:prod/nfe:vProd', namespaces=ns)
-
-        itens.append({
-            'Nome Fornecedor': nome_fornecedor,
-            'Nº NF': numero_nf,
-            'Nome Item': nome_item,
-            'Quantidade': quantidade,
-            'Valor Unitário': valor_unitario,
-            'Valor Total Item': valor_total_item,
-            'Valor Total NF': valor_total_nf
-        })
-
-    return itens
-
-# Processar arquivos
 if uploaded_files:
-    resultados = []
-    for file in uploaded_files:
+    for uploaded_file in uploaded_files:
+        tree = ET.parse(uploaded_file)
+        root = tree.getroot()
+
+        # Namespace fix
+        ns = {'nfe': 'http://www.portalfiscal.inf.br/nfe'}
+
+        # Dados principais
         try:
-            content = file.read().decode('utf-8')
-            dados = extrair_dados(content)
-            resultados.extend(dados)
-        except Exception as e:
-            st.error(f"Erro ao processar o arquivo {file.name}: {e}")
+            fornecedor = root.find('.//nfe:emit/nfe:xNome', ns).text
+            numero_nf = root.find('.//nfe:ide/nfe:nNF', ns).text
+            total_nf = root.find('.//nfe:total/nfe:ICMSTot/nfe:vNF', ns).text
+        except:
+            fornecedor = numero_nf = total_nf = "Não encontrado"
 
-    if resultados:
-        df = pd.DataFrame(resultados)
-        st.subheader("📊 Resultados extraídos:")
-        st.dataframe(df)
+        # Itens da NF
+        for det in root.findall('.//nfe:det', ns):
+            prod = det.find('nfe:prod', ns)
 
-        # Download Excel
-        excel = df.to_excel(index=False, engine='openpyxl')
-        st.download_button("📥 Baixar como Excel", data=excel, file_name='itens_nfe.xlsx', mime='application/vnd.openxmlformats-officedocument.spreadsheetml.sheet')
+            if prod is not None:
+                nome_item = prod.find('nfe:xProd', ns).text
+                quantidade = prod.find('nfe:qCom', ns).text
+                valor_unitario = prod.find('nfe:vUnCom', ns).text
+                valor_total_item = prod.find('nfe:vProd', ns).text
+
+                data.append({
+                    'Fornecedor': fornecedor,
+                    'Número NF': numero_nf,
+                    'Item': nome_item,
+                    'Quantidade': quantidade,
+                    'Valor Unitário': valor_unitario,
+                    'Valor Total Item': valor_total_item,
+                    'Valor Total NF': total_nf
+                })
+
+    # Exibir resultado
+    df = pd.DataFrame(data)
+    st.dataframe(df)
+
+    # Download Excel
+    output = BytesIO()
+    with pd.ExcelWriter(output, engine='openpyxl') as writer:
+        df.to_excel(writer, index=False)
+
+    st.download_button(
+        label="📥 Baixar como Excel",
+        data=output.getvalue(),
+        file_name="itens_nfe.xlsx",
+        mime="application/vnd.openxmlformats-officedocument.spreadsheetml.sheet"
+    )
+else:
+    st.info("📥 Carregue um ou mais arquivos XML de NFe para começar.")
