@@ -2,47 +2,50 @@ import streamlit as st
 import xml.etree.ElementTree as ET
 import pandas as pd
 
-st.set_page_config(page_title="Extrator de NFe XML", layout="wide")
-st.title("📄 Extrator de NFe XML - Multi Arquivos")
+st.set_page_config(page_title="Extrator de Itens NFe XML", layout="wide")
+st.title("📄 Extrator de Itens NFe XML")
 
-# Upload de múltiplos arquivos XML
 uploaded_files = st.file_uploader("Selecione os arquivos XML da NFe", type="xml", accept_multiple_files=True)
 
-# Função para extrair dados de um XML NFe
+# Função para extrair dados de cada NFe
 def extrair_dados(xml_content):
     root = ET.fromstring(xml_content)
 
-    ns = {
-        'nfe': 'http://www.portalfiscal.inf.br/nfe'
-    }
+    ns = {'nfe': 'http://www.portalfiscal.inf.br/nfe'}
 
     # Dados principais
-    cnpj_emitente = root.findtext('.//nfe:emit/nfe:CNPJ', namespaces=ns)
-    razao_social_emitente = root.findtext('.//nfe:emit/nfe:xNome', namespaces=ns)
-    cnpj_destinatario = root.findtext('.//nfe:dest/nfe:CNPJ', namespaces=ns)
-    razao_social_destinatario = root.findtext('.//nfe:dest/nfe:xNome', namespaces=ns)
-    valor_total = root.findtext('.//nfe:ICMSTot/nfe:vNF', namespaces=ns)
-    data_emissao = root.findtext('.//nfe:ide/nfe:dhEmi', namespaces=ns)
-    chave_nfe = root.attrib.get('Id', '').replace('NFe', '')
+    nome_fornecedor = root.findtext('.//nfe:emit/nfe:xNome', namespaces=ns)
+    numero_nf = root.findtext('.//nfe:ide/nfe:nNF', namespaces=ns)
+    valor_total_nf = root.findtext('.//nfe:ICMSTot/nfe:vNF', namespaces=ns)
 
-    return {
-        'Chave NFe': chave_nfe,
-        'CNPJ Emitente': cnpj_emitente,
-        'Razão Social Emitente': razao_social_emitente,
-        'CNPJ Destinatário': cnpj_destinatario,
-        'Razão Social Destinatário': razao_social_destinatario,
-        'Valor Total (R$)': valor_total,
-        'Data Emissão': data_emissao
-    }
+    # Itens (det)
+    itens = []
+    for det in root.findall('.//nfe:det', namespaces=ns):
+        nome_item = det.findtext('nfe:prod/nfe:xProd', namespaces=ns)
+        quantidade = det.findtext('nfe:prod/nfe:qCom', namespaces=ns)
+        valor_unitario = det.findtext('nfe:prod/nfe:vUnCom', namespaces=ns)
+        valor_total_item = det.findtext('nfe:prod/nfe:vProd', namespaces=ns)
 
-# Processamento dos arquivos
+        itens.append({
+            'Nome Fornecedor': nome_fornecedor,
+            'Nº NF': numero_nf,
+            'Nome Item': nome_item,
+            'Quantidade': quantidade,
+            'Valor Unitário': valor_unitario,
+            'Valor Total Item': valor_total_item,
+            'Valor Total NF': valor_total_nf
+        })
+
+    return itens
+
+# Processar arquivos
 if uploaded_files:
     resultados = []
     for file in uploaded_files:
         try:
             content = file.read().decode('utf-8')
             dados = extrair_dados(content)
-            resultados.append(dados)
+            resultados.extend(dados)
         except Exception as e:
             st.error(f"Erro ao processar o arquivo {file.name}: {e}")
 
@@ -51,6 +54,6 @@ if uploaded_files:
         st.subheader("📊 Resultados extraídos:")
         st.dataframe(df)
 
-        # Download CSV
-        csv = df.to_csv(index=False).encode('utf-8')
-        st.download_button("📥 Baixar como CSV", data=csv, file_name='dados_nfe.csv', mime='text/csv')
+        # Download Excel
+        excel = df.to_excel(index=False, engine='openpyxl')
+        st.download_button("📥 Baixar como Excel", data=excel, file_name='itens_nfe.xlsx', mime='application/vnd.openxmlformats-officedocument.spreadsheetml.sheet')
