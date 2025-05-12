@@ -1,76 +1,56 @@
-import tkinter as tk
-from tkinter import filedialog, messagebox
+import streamlit as st
 import xml.etree.ElementTree as ET
 import pandas as pd
-import os
 
-# Função para extrair dados do XML
-def processar_xml(caminho):
-    ns = {'nfe': 'http://www.portalfiscal.inf.br/nfe'}
-    tree = ET.parse(caminho)
-    root = tree.getroot()
+st.set_page_config(page_title="Extrator de NFe XML", layout="wide")
+st.title("📄 Extrator de NFe XML - Multi Arquivos")
 
-    # Nome do fornecedor
-    emitente = root.find('.//nfe:emit/nfe:xNome', ns)
-    nome_fornecedor = emitente.text if emitente is not None else ''
+# Upload de múltiplos arquivos XML
+uploaded_files = st.file_uploader("Selecione os arquivos XML da NFe", type="xml", accept_multiple_files=True)
 
-    # Número da NF
-    ide = root.find('.//nfe:ide/nfe:nNF', ns)
-    numero_nf = ide.text if ide is not None else ''
+# Função para extrair dados de um XML NFe
+def extrair_dados(xml_content):
+    root = ET.fromstring(xml_content)
 
-    # Valor total da NF
-    total_nf = root.find('.//nfe:ICMSTot/nfe:vNF', ns)
-    valor_total_nf = total_nf.text if total_nf is not None else ''
+    ns = {
+        'nfe': 'http://www.portalfiscal.inf.br/nfe'
+    }
 
-    # Itens da nota
-    itens = []
-    for det in root.findall('.//nfe:det', ns):
-        prod = det.find('nfe:prod', ns)
-        if prod is not None:
-            item = {
-                'Fornecedor': nome_fornecedor,
-                'Numero NF': numero_nf,
-                'Item': prod.find('nfe:xProd', ns).text if prod.find('nfe:xProd', ns) is not None else '',
-                'Quantidade': prod.find('nfe:qCom', ns).text if prod.find('nfe:qCom', ns) is not None else '',
-                'Valor Unitario': prod.find('nfe:vUnCom', ns).text if prod.find('nfe:vUnCom', ns) is not None else '',
-                'Valor Total Item': prod.find('nfe:vProd', ns).text if prod.find('nfe:vProd', ns) is not None else '',
-                'Valor Total NF': valor_total_nf
-            }
-            itens.append(item)
-    return itens
+    # Dados principais
+    cnpj_emitente = root.findtext('.//nfe:emit/nfe:CNPJ', namespaces=ns)
+    razao_social_emitente = root.findtext('.//nfe:emit/nfe:xNome', namespaces=ns)
+    cnpj_destinatario = root.findtext('.//nfe:dest/nfe:CNPJ', namespaces=ns)
+    razao_social_destinatario = root.findtext('.//nfe:dest/nfe:xNome', namespaces=ns)
+    valor_total = root.findtext('.//nfe:ICMSTot/nfe:vNF', namespaces=ns)
+    data_emissao = root.findtext('.//nfe:ide/nfe:dhEmi', namespaces=ns)
+    chave_nfe = root.attrib.get('Id', '').replace('NFe', '')
 
-# Função para selecionar e processar arquivos
-def selecionar_arquivos():
-    arquivos = filedialog.askopenfilenames(filetypes=[("XML files", "*.xml")])
-    if not arquivos:
-        return
+    return {
+        'Chave NFe': chave_nfe,
+        'CNPJ Emitente': cnpj_emitente,
+        'Razão Social Emitente': razao_social_emitente,
+        'CNPJ Destinatário': cnpj_destinatario,
+        'Razão Social Destinatário': razao_social_destinatario,
+        'Valor Total (R$)': valor_total,
+        'Data Emissão': data_emissao
+    }
 
-    todos_itens = []
-    for arquivo in arquivos:
+# Processamento dos arquivos
+if uploaded_files:
+    resultados = []
+    for file in uploaded_files:
         try:
-            itens_nf = processar_xml(arquivo)
-            todos_itens.extend(itens_nf)
+            content = file.read().decode('utf-8')
+            dados = extrair_dados(content)
+            resultados.append(dados)
         except Exception as e:
-            messagebox.showerror("Erro", f"Erro ao processar {os.path.basename(arquivo)}: {e}")
+            st.error(f"Erro ao processar o arquivo {file.name}: {e}")
 
-    if todos_itens:
-        df = pd.DataFrame(todos_itens)
-        salvar_arquivo = filedialog.asksaveasfilename(defaultextension=".xlsx", filetypes=[("Excel files", "*.xlsx")])
-        if salvar_arquivo:
-            df.to_excel(salvar_arquivo, index=False)
-            messagebox.showinfo("Sucesso", f"Arquivo salvo com sucesso em:\n{salvar_arquivo}")
-    else:
-        messagebox.showwarning("Aviso", "Nenhum item encontrado nos arquivos selecionados.")
+    if resultados:
+        df = pd.DataFrame(resultados)
+        st.subheader("📊 Resultados extraídos:")
+        st.dataframe(df)
 
-# Janela principal (Tkinter)
-janela = tk.Tk()
-janela.title("Extrator de NF-e XML para Excel")
-janela.geometry("400x200")
-
-label = tk.Label(janela, text="Selecione os arquivos XML das NF-e:", font=("Arial", 12))
-label.pack(pady=20)
-
-botao = tk.Button(janela, text="Selecionar XMLs", command=selecionar_arquivos, width=20, height=2)
-botao.pack()
-
-janela.mainloop()
+        # Download CSV
+        csv = df.to_csv(index=False).encode('utf-8')
+        st.download_button("📥 Baixar como CSV", data=csv, file_name='dados_nfe.csv', mime='text/csv')
